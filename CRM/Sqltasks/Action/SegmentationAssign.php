@@ -43,74 +43,12 @@ class CRM_Sqltasks_Action_SegmentationAssign extends CRM_Sqltasks_Action {
   }
 
   /**
-   * Build the configuration UI
+   * Get default template order
+   *
+   * @return int
    */
-  public function buildForm(&$form) {
-    parent::buildForm($form);
-
-    $form->add(
-      'text',
-      $this->getID() . '_table',
-      E::ts('Data Table'),
-      ['style' => 'font-family: monospace, monospace !important']
-    );
-
-    $form->add(
-      'select',
-      $this->getID() . '_campaign_id',
-      E::ts('Campaign'),
-      $this->getEligibleCampaigns(),
-      FALSE,
-      array('class' => 'crm-select2 huge')
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_segment_name',
-      E::ts('Segment'),
-      array('class' => 'huge')
-    );
-
-    $form->add(
-      'checkbox',
-      $this->getID() . '_clear',
-      E::ts('Clear before assignment')
-    );
-
-    $form->add(
-      'checkbox',
-      $this->getID() . '_segment_from_table',
-      E::ts('Segment from data table')
-    );
-
-    $form->add(
-      'select',
-      $this->getID() . '_start',
-      E::ts('Change Campaign Status'),
-      $this->getCampaignStatusOptions(),
-      FALSE,
-      array('class' => 'crm-select2 huge')
-    );
-
-    $form->add(
-      'textarea',
-      $this->getID() . '_segment_order',
-      E::ts('Segment Order'),
-      array('rows' => 8, 'cols' => 40, 'style' => 'font-family: monospace, monospace !important'),
-      FALSE
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_segment_order_table',
-      E::ts('Segment Order Table'),
-      array('class' => 'huge', 'style' => 'font-family: monospace, monospace !important')
-    );
-
-
-    // pass on specs for the 'custom segment' option
-    $form->assign($this->getID() . '_custom_segment_label', E::ts('[<i>from data table</i>: <code>segment_name</code>]'));
-    $form->assign($this->getID() . '_custom_segment_id', CUSTOM_SEGMENT_ID);
+  public function getDefaultOrder() {
+    return 100;
   }
 
   /**
@@ -158,6 +96,7 @@ class CRM_Sqltasks_Action_SegmentationAssign extends CRM_Sqltasks_Action {
     if ($status_change == 'restart_t') {
       // get the order from the table
       $table_name = $this->getConfigValue('segment_order_table');
+      $this->resolveTableToken($table_name);
       $segment_colum = CRM_Core_DAO::singleValueQuery("SHOW COLUMNS FROM `{$table_name}` LIKE 'segment_name';");
       if (!$segment_colum) {
         throw new Exception("Segmentation order table '{$table_name}' has no column 'segment_name'.", 1);
@@ -180,6 +119,7 @@ class CRM_Sqltasks_Action_SegmentationAssign extends CRM_Sqltasks_Action {
    */
   protected function getDataTable() {
     $table_name = $this->getConfigValue('table');
+    $this->resolveTableToken($table_name);
     return trim($table_name);
   }
 
@@ -398,7 +338,7 @@ class CRM_Sqltasks_Action_SegmentationAssign extends CRM_Sqltasks_Action {
   /**
    * get the campaign status options
    */
-  protected function getCampaignStatusOptions() {
+  public static function getCampaignStatusOptions() {
     return array(
       'leave'     => E::ts("don't change status"),
       'planned'   => E::ts("(re)set to 'planned'"),
@@ -440,6 +380,7 @@ class CRM_Sqltasks_Action_SegmentationAssign extends CRM_Sqltasks_Action {
     if ($status_change == 'restart_t') {
       // get the order from the table
       $table_name = $this->getConfigValue('segment_order_table');
+      $this->resolveTableToken($table_name);
       $query = CRM_Core_DAO::executeQuery("SELECT DISTINCT(`segment_name`) AS sname FROM `{$table_name}` ORDER BY `segment_weight` ASC");
       while ($query->fetch()) {
         // look up segment by name
@@ -476,4 +417,9 @@ class CRM_Sqltasks_Action_SegmentationAssign extends CRM_Sqltasks_Action {
 
     return $new_order;
   }
+
+  public static function isSupported() {
+    return CRM_Sqltasks_Utils::isSegmentationInstalled();
+  }
+
 }

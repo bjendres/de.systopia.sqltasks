@@ -37,105 +37,18 @@ class CRM_Sqltasks_Action_CSVExport extends CRM_Sqltasks_Action {
   }
 
   /**
-   * Build the configuration UI
+   * Get default template order
+   *
+   * @return int
    */
-  public function buildForm(&$form) {
-    parent::buildForm($form);
-
-    $form->add(
-      'text',
-      $this->getID() . '_table',
-      E::ts('Export Table'),
-      ['style' => 'font-family: monospace, monospace !important']
-    );
-
-    $form->add(
-      'select',
-      $this->getID() . '_encoding',
-      E::ts('File Encoding'),
-      $this->getEncodingOptions()
-    );
-
-    $form->add(
-      'select',
-      $this->getID() . '_delimiter',
-      E::ts('Delimiter'),
-      $this->getDelimiterOptions()
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_delimiter_other',
-      E::ts('Other delimiter'),
-      ['style' => 'width: 50px; font-family: monospace, monospace !important']
-    );
-
-    $form->add(
-      'textarea',
-      $this->getID() . '_headers',
-      E::ts('Columns'),
-      array('rows' => 8, 'cols' => 40, 'style' => 'font-family: monospace, monospace !important')
-    );
-
-
-    $form->add(
-      'checkbox',
-      $this->getID() . '_zip',
-      E::ts('ZIP File')
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_filename',
-      E::ts('File Name'),
-      array('class' => 'huge', 'style' => 'font-family: monospace, monospace !important')
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_path',
-      E::ts('File Path'),
-      array('class' => 'huge', 'style' => 'font-family: monospace, monospace !important')
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_email',
-      E::ts('Email to'),
-      array('class' => 'huge')
-    );
-
-    $form->add(
-      'checkbox',
-      $this->getID() . '_downloadURL',
-      E::ts('Send URL to download file instead of attachment')
-    );
-
-    $form->add(
-      'select',
-      $this->getID() . '_email_template',
-      E::ts('Email Template'),
-      $this->getAllTemplates()
-    );
-
-    $form->add(
-      'text',
-      $this->getID() . '_upload',
-      E::ts('Upload to'),
-      array('class' => 'huge', 'style' => 'font-family: monospace, monospace !important')
-    );
-
-    $form->add(
-      'checkbox',
-      $this->getID() . '_discard_empty',
-      E::ts('Discard empty file?')
-    );
+  public function getDefaultOrder() {
+    return 400;
   }
 
   /**
    * get all possible delimiters
    */
-  protected function getDelimiterOptions() {
+  public static function getDelimiterOptions() {
     return array(
       ';' => E::ts('Semicolon (;)'),
       ',' => E::ts('Comma (,)'),
@@ -160,9 +73,9 @@ class CRM_Sqltasks_Action_CSVExport extends CRM_Sqltasks_Action {
   }
 
   /**
-   * get all possible encodings
+   * Get all possible encodings
    */
-  protected function getEncodingOptions() {
+  public static function getEncodingOptions() {
     $encodings = array();
     $mb_list = mb_list_encodings();
     foreach ($mb_list as $mb_encoding) {
@@ -193,6 +106,7 @@ class CRM_Sqltasks_Action_CSVExport extends CRM_Sqltasks_Action {
    */
   protected function getExportTable() {
     $table_name = $this->getConfigValue('table');
+    $this->resolveTableToken($table_name);
     return trim($table_name);
   }
 

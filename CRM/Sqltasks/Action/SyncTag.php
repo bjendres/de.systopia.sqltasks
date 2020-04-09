@@ -37,30 +37,12 @@ class CRM_Sqltasks_Action_SyncTag extends CRM_Sqltasks_Action_ContactSet {
   }
 
   /**
-   * Build the configuration UI
+   * Get default template order
+   *
+   * @return int
    */
-  public function buildForm(&$form) {
-    parent::buildForm($form);
-
-    $form->add(
-      'select',
-      $this->getID() . '_tag_id',
-      E::ts('Synchronise Tag'),
-      $this->getEligibleTags()
-    );
-
-    $form->add(
-      'select',
-      $this->getID() . '_entity_table',
-      E::ts('Choose Entity'),
-      $this->getEligibleEntities()
-    );
-
-    $form->add(
-      'checkbox',
-      $this->getID() . '_use_api',
-      E::ts('Use API (slow)')
-    );
+  public function getDefaultOrder() {
+    return 500;
   }
 
   /**
@@ -168,15 +150,15 @@ class CRM_Sqltasks_Action_SyncTag extends CRM_Sqltasks_Action_ContactSet {
       'option.limit' => 0,
       'return'       => 'id,name'))['values'];
     foreach ($tag_query as $tag) {
-      $tag_list[$tag['id']] = CRM_Utils_Array::value('name', $tag, "Tag {$tag['id']}");
+      $tag_list[$tag['id']] = CRM_Utils_Array::value('name', $tag, 'Tag') . ' [' . $tag['id'] . ']';
     }
     return $tag_list;
   }
 
   /**
-   * get a list of eligible groups
+   * Get a list of eligible groups
    */
-  protected function getEligibleEntities() {
+  public static function getEligibleEntities() {
     return array(
       'civicrm_contact'      => E::ts("Contacts"),
       'civicrm_activity'     => E::ts("Activities"),

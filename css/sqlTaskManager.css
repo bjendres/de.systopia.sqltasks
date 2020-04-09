@@ -1,0 +1,7 @@
+.page-civicrm-a.page-civicrm-a table:not(.form-layout-compressed) .tasks-table tr.even-row:not(.disabled)  {
+  background: #d3f5ac;
+}
+
+.page-civicrm-a.page-civicrm-a table:not(.form-layout-compressed) .tasks-table tr.odd-row:not(.disabled) {
+  background: #e5f9d0;
+}

@@ -22,7 +22,7 @@ use CRM_Sqltasks_ExtensionUtil as E;
  */
 class CRM_Sqltasks_Task {
 
-  protected static $main_attributes = array(
+  protected static $main_attributes = [
     'name'            => 'String',
     'description'     => 'String',
     'category'        => 'String',
@@ -33,8 +33,12 @@ class CRM_Sqltasks_Task {
     'last_runtime'    => 'Integer',
     'parallel_exec'   => 'Integer',
     'run_permissions' => 'String',
+    // REMOVED - DO NOT USE
     'main_sql'        => 'String',
-    'post_sql'        => 'String');
+    // REMOVED - DO NOT USE
+    'post_sql'        => 'String',
+    'input_required'  => 'Integer',
+  ];
 
   protected $task_id;
   protected $attributes;
@@ -62,11 +66,29 @@ class CRM_Sqltasks_Task {
     foreach (self::$main_attributes as $attribute_name => $attribute_type) {
       $this->attributes[$attribute_name] = CRM_Utils_Array::value($attribute_name, $data);
     }
+    $this->setDefaultAttributes();
 
-    // everything else goes into $this->config
+    // everything else is passed to setConfiguration()
+    $config = [];
     foreach ($data as $attribute_name => $value) {
       if (!isset(self::$main_attributes[$attribute_name])) {
-        $this->config[$attribute_name] = $value;
+        $config[$attribute_name] = $value;
+      }
+    }
+    $this->setConfiguration($config);
+  }
+
+  /**
+   * Set default values for some attributes
+   */
+  private function setDefaultAttributes() {
+    $defaults = [
+      'parallel_exec'  => 0,
+      'input_required' => 0,
+    ];
+    foreach ($defaults as $attribute => $value) {
+      if (empty($this->attributes[$attribute])) {
+        $this->attributes[$attribute] = $value;
       }
     }
   }
@@ -107,8 +129,25 @@ class CRM_Sqltasks_Task {
 
   /**
    * set entire configuration
+   *
+   * @param $config
+   * @param bool $writeTrough
+   *
+   * @return mixed
    */
-  public function setConfiguration($config) {
+  public function setConfiguration($config, $writeTrough = FALSE) {
+    $config['version'] = CRM_Sqltasks_Config_Format::getVersion($config);
+    if ($writeTrough && $this->task_id) {
+      CRM_Core_DAO::executeQuery(
+        "UPDATE `civicrm_sqltasks`
+         SET `config` = %1
+         WHERE id = %2",
+        [
+          1 => [json_encode($config), 'String'],
+          2 => [$this->task_id, 'Integer'],
+        ]
+      );
+    }
     return $this->config = $config;
   }
 
@@ -160,6 +199,7 @@ class CRM_Sqltasks_Task {
   public function setAttribute($attribute_name, $value, $writeTrough = FALSE) {
     if (isset(self::$main_attributes[$attribute_name])) {
       $this->attributes[$attribute_name] = $value;
+      $this->setDefaultAttributes();
       if ($writeTrough && $this->task_id) {
         CRM_Core_DAO::executeQuery("UPDATE `civicrm_sqltasks`
                                     SET `{$attribute_name}` = %1
@@ -172,9 +212,19 @@ class CRM_Sqltasks_Task {
   }
 
   /**
+   * Get all task attributes
+   *
+   * @return array
+   */
+  public function getAttributes() {
+    return $this->attributes;
+  }
+
+  /**
    * Store this task (create or update)
    */
   public function store() {
+    $this->setDefaultAttributes();
     // sort out parameters
     $params = array();
     $fields = array();
@@ -190,6 +240,10 @@ class CRM_Sqltasks_Task {
         $fields[$attribute_name] = "NULL";
       } else {
         $fields[$attribute_name] = "%{$index}";
+        if (is_bool($value)) {
+          // need to convert bools to int for DAO
+          $value = (int) $value;
+        }
         $params[$index] = array($value, $attribute_type);
         $index += 1;
       }
@@ -216,8 +270,6 @@ class CRM_Sqltasks_Task {
       $values_sql  = implode(',', $values);
       $sql = "INSERT INTO `civicrm_sqltasks` ({$columns_sql}) VALUES ({$values_sql});";
     }
-    // error_log("STORE QUERY: " . $sql);
-    // error_log("STORE PARAM: " . json_encode($params));
     CRM_Core_DAO::executeQuery($sql, $params);
     if (empty($this->task_id)) {
       $this->task_id = CRM_Core_DAO::singleValueQuery('SELECT LAST_INSERT_ID()');
@@ -249,18 +301,18 @@ class CRM_Sqltasks_Task {
       CRM_Core_DAO::executeQuery("UPDATE `civicrm_sqltasks` SET last_execution = NOW(), running_since = NOW() WHERE id = {$this->task_id};");
     }
 
-    // 1. run the main SQL
-    $this->executeSQLScript($this->getAttribute('main_sql'), "Main SQL");
-
-    // 2. run the actions
     $actions = CRM_Sqltasks_Action::getAllActiveActions($this);
+    $context = [
+      'actions' => $actions,
+      'random'  => CRM_Utils_String::createRandom(16, CRM_Utils_String::ALPHANUMERIC),
+    ];
+    if ($this->getAttribute('input_required') && !empty($params['input_val'])) {
+      $context['input_val'] = $params['input_val'];
+    }
     foreach ($actions as $action) {
-      if ($action->isResultHandler()) {
-        continue; // result handlers will only be executed at the end
-      }
-
       $action_name = $action->getName();
       $timestamp = microtime(TRUE);
+      $action->setContext($context);
 
       // check action configuration
       try {
@@ -282,23 +334,12 @@ class CRM_Sqltasks_Task {
       }
     }
 
-    // 3. run the post SQL
-    $this->executeSQLScript($this->getAttribute('post_sql'), "Post SQL");
-
-    // 4. update/close the task
     $task_runtime = (int) (microtime(TRUE) * 1000) - $task_timestamp;
     CRM_Core_DAO::executeQuery("UPDATE `civicrm_sqltasks` SET running_since = NULL, last_runtime = {$task_runtime} WHERE id = {$this->task_id};");
     if ($this->error_count) {
       $this->status = 'error';
     } else {
       $this->status = 'success';
-    }
-
-    // 5. run result handlers
-    foreach ($actions as $action) {
-      if ($action->isResultHandler()) {
-        $action->executeResultHandler($actions);
-      }
     }
 
     return $this->log_messages;
@@ -350,7 +391,22 @@ class CRM_Sqltasks_Task {
   }
 
   /**
+   * Get a list of tasks ready for execution which prepared for select
+   */
+  public static function getExecutionTaskListOptions() {
+    $preparedTasksOptions = array();
+    $task_search = CRM_Core_DAO::executeQuery('SELECT `id`, `name` FROM civicrm_sqltasks WHERE enabled=1 ORDER BY weight ASC, id ASC');
+    while ($task_search->fetch()) {
+      $preparedTasksOptions[$task_search->id] = "[{$task_search->id}] " . $task_search->name;
+    }
+
+    return $preparedTasksOptions;
+  }
+
+  /**
    * Get a list of all tasks
+   *
+   * @return CRM_Sqltasks_Task[]
    */
   public static function getAllTasks() {
     return self::getTasks('SELECT * FROM civicrm_sqltasks ORDER BY weight ASC, id ASC');
@@ -371,7 +427,23 @@ class CRM_Sqltasks_Task {
   }
 
   /**
+   * Get a list of all SQL Task categories
+   */
+  public static function getTaskCategoryList() {
+    $categories = [];
+    $categoryDAO = CRM_Core_DAO::executeQuery("SELECT DISTINCT(category) AS category FROM `civicrm_sqltasks`;");
+
+    while ($categoryDAO->fetch()) {
+      $categories[] = $categoryDAO->category;
+    }
+
+    return $categories;
+  }
+
+  /**
    * Load a list of tasks based on the data yielded by the given SQL query
+   *
+   * @return CRM_Sqltasks_Task[]
    */
   public static function getTasks($sql_query) {
     $tasks = array();
@@ -623,14 +695,14 @@ class CRM_Sqltasks_Task {
    * get the option for scheduling (simple version)
    */
   public static function getSchedulingOptions() {
-    $frequencies = array(
+    $frequencies = [
       'always'  => E::ts('always'),
       'hourly'  => E::ts('every hour'),
       'daily'   => E::ts('every day (after midnight)'),
       'weekly'  => E::ts('every week'),
       'monthly' => E::ts('every month'),
       'yearly'  => E::ts('annually'),
-      );
+    ];
 
     // get scheduler information
     $config = CRM_Sqltasks_Config::singleton();
@@ -688,4 +760,90 @@ class CRM_Sqltasks_Task {
   public static function getLastFile() {
     return end(self::$files);
   }
+
+  /**
+   * Returns prepared task
+   *
+   * @return array
+   */
+  public function getPreparedTask() {
+    $data = [
+      'id'             => $this->getID(),
+      'name'           => $this->getAttribute('name'),
+      'description'    => $this->getAttribute('description'),
+      'category'       => $this->getAttribute('category'),
+      'schedule_label' => $this->prepareSchedule($this->getAttribute('scheduled')),
+      'schedule'       => $this->getAttribute('scheduled'),
+      'scheduled'      => $this->getAttribute('scheduled'),
+      'run_permissions'=> $this->getAttribute('run_permissions'),
+      'last_executed'  => $this->prepareDate($this->getAttribute('last_execution')),
+      'last_runtime'   => $this->prepareRuntime($this->getAttribute('last_runtime')),
+      'parallel_exec'  => $this->getAttribute('parallel_exec'),
+      'input_required' => $this->getAttribute('input_required'),
+      'next_execution' => 'TODO',
+      'enabled'        => (empty($this->getAttribute('enabled'))) ? 0 : 1,
+      'config'         => $this->getConfiguration(),
+    ];
+
+    if (strlen($data['description']) > 64) {
+      $data['short_desc'] = substr($data['description'], 0, 64) . '...';
+    } else {
+      $data['short_desc'] = $data['description'];
+    }
+
+    return $data;
+  }
+
+  /**
+   * Prepares a date
+   *
+   * @param $string
+   *
+   * @return false|string
+   */
+  protected function prepareDate($string) {
+    if (empty($string)) {
+      return E::ts('never');
+    } else {
+      return date('Y-m-d H:i:s', strtotime($string));
+    }
+  }
+
+  /**
+   * Prepares a scheduling option
+   *
+   * @param $string
+   *
+   * @return mixed|string
+   */
+  protected function prepareSchedule($string) {
+    $options = CRM_Sqltasks_Task::getSchedulingOptions();
+    if (isset($options[$string])) {
+      return $options[$string];
+    } else {
+      return E::ts('ERROR');
+    }
+  }
+
+  /**
+   * Prepares an integer microtime value
+   *
+   * @param $value
+   *
+   * @return mixed|string
+   */
+  protected function prepareRuntime($value) {
+    if (!$value) {
+      return E::ts('n/a');
+    } elseif ($value > (1000 * 60)) {
+      // render values > 1 minute as min:second
+      $minutes = $value / (1000 * 60);
+      $seconds = ($value % (1000 * 60)) / 1000;
+      return sprintf("%d:%02d min", $minutes, $seconds);
+    } else {
+      // render values < 1 minute as 0.000 seconds
+      return sprintf("%d.%03ds", ($value/1000), ($value%1000));
+    }
+  }
+
 }
